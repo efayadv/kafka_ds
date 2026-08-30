@@ -3,6 +3,7 @@ package main.java.com.simplekafka.broker;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
+import main.java.com.simplekafka.broker.Protocol.FetchResult;
 import main.java.com.simplekafka.broker.Protocol.ProduceResult;
 
 public class Protocol {
@@ -127,7 +128,12 @@ public class Protocol {
         
         return new ProduceResult(offset, status == 0 ? null: "Produce Failed");
     }
-
+    /**
+     * Decodes response from fetch request
+     * 
+     * @param buffer
+     * @return
+     */
     public static FetchResult decodeFetchResponse(ByteBuffer buffer) {
         byte responseType = buffer.get();
 
@@ -141,11 +147,27 @@ public class Protocol {
         byte[][] messages = new byte[messageCount][]; //byte[] is an array()
 
         //extracting each message with its offset and size
-        for (int i = 1; i <= messageCount; i++) {
-
-
+        //lets FIO on paper
+        for (int i = 1; i < messageCount; i++) {
+            long offset = buffer.getLong(); //skip
+            int size = buffer.getInt();
+            messages[i] = new byte[size];
+            buffer.get(messages[i]);
         }
 
+        return new FetchResult(messages, null);
+    }
+
+    public static MetadataResult decodeMetadataResponse(ByteBuffer buffer) {
+        //Processes broker information (IDs, hosts, ports)
+        int id = buffer.getInt();
+        String host = StandardCharsets.UTF_8.decode(buffer).toString();
+        int port = buffer.getInt();
+        //Processes topic metadata(partitions, leaders, replicas)
+
+
+
+        //BrokerInfo broker = new BrokerInfo(CREATE_TOPIC_RESPONSE, null, CREATE_TOPIC);
 
     }
 
@@ -175,4 +197,41 @@ public class Protocol {
         }
     }
 
+    public static class FetchResult {
+        private final byte[][] messages;
+        private final String error;
+
+        public FetchResult(byte[][] messages, String error) {
+            this.messages = messages;
+            this.error = error;
+        }
+
+        public byte[][] getMessages() {
+            return messages;
+        }
+
+        public int getMessageCount() {
+            return messages.length;
+        }
+
+        public String getError() {
+            return error;
+        }
+
+        public boolean isSuccess() {
+            return error == null;
+        }
+        
+    }
+
+    public static class TopicMetadata {
+        private final String topic;
+        //partition Metadata
+
+    }
+
+    public static class PartitionMetadata {
+        private final int id;
+
+    }
 }
