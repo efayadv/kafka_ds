@@ -3,6 +3,8 @@ package main.java.com.simplekafka.broker;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
+import main.java.com.simplekafka.broker.Protocol.ProduceResult;
+
 public class Protocol {
     // Client request types
     public static final byte PRODUCE = 0x01;
@@ -16,6 +18,7 @@ public class Protocol {
     public static final byte METADATA_RESPONSE = 0x13;
     public static final byte CREATE_TOPIC_RESPONSE = 0x14;
 
+    //ENCODING
     /*
     Encodes a request to produce (write) a message to a specific topic and partition
      */
@@ -104,6 +107,72 @@ public class Protocol {
         return buffer;
     }
 
+    //DECODING
+    /*
+    Decodes a response from a produce request
+     */
+    public static ProduceResult decodeProduceResponse(ByteBuffer buffer) {
+        //check if response type matches PRODUCE_RESPONSE
+        byte responseType = buffer.get();
 
+        if (responseType != PRODUCE_RESPONSE) {
+            throw new IllegalArgumentException( //HANDLE ERROR RESPONSE
+                "Expected PRODUCE_RESPONSE but received: " + responseType
+            );
+        }
+
+        //Extracts offset and status information
+        long offset = buffer.getLong();
+        byte status = buffer.get();
+        
+        return new ProduceResult(offset, status == 0 ? null: "Produce Failed");
+    }
+
+    public static FetchResult decodeFetchResponse(ByteBuffer buffer) {
+        byte responseType = buffer.get();
+
+        if (responseType != FETCH) {
+            throw new IllegalArgumentException(
+                "Expected FETCH but received: " + responseType
+            );
+        }
+
+        int messageCount = buffer.getInt(); //extracts message count
+        byte[][] messages = new byte[messageCount][]; //byte[] is an array()
+
+        //extracting each message with its offset and size
+        for (int i = 1; i <= messageCount; i++) {
+
+
+        }
+
+
+    }
+
+    /**
+     * 
+     * ProduceResult class
+     */
+    public static class ProduceResult {
+        private final long offset;
+        private final String error;
+
+        public ProduceResult(long offset, String error) {
+            this.offset = offset;
+            this.error = error;
+        }
+
+        public long getOffset() {
+            return offset;
+        }
+        
+        public String getError() {
+            return error;
+        }
+
+        public boolean isSuccess() {
+            return error == null;
+        }
+    }
 
 }
