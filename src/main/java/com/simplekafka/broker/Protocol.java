@@ -1,5 +1,6 @@
 package main.java.com.simplekafka.broker;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
@@ -18,6 +19,7 @@ public class Protocol {
     public static final byte FETCH_RESPONSE = 0x12;
     public static final byte METADATA_RESPONSE = 0x13;
     public static final byte CREATE_TOPIC_RESPONSE = 0x14;
+    public static final byte ERROR_RESPONSE = 0x1F;
 
     //internal broker communication
     public static final byte REPLICATE = 0x21;
@@ -30,8 +32,13 @@ public class Protocol {
      * @param channel
      * @param errorMessage
      */
-    public static void sendErrorResponse(SocketChannel channel, String errorMessage) {
-        
+    public static void sendErrorResponse(SocketChannel channel, String errorMessage) throws IOException {
+        ByteBuffer buffer = ByteBuffer.allocate(3 + errorMessage.length());
+        buffer.put(ERROR_RESPONSE);
+        buffer.putShort((short) errorMessage.length());
+        buffer.put(errorMessage.getBytes());
+        buffer.flip();
+        channel.write(buffer);
     }
 
     //ENCODING
@@ -167,9 +174,14 @@ public class Protocol {
         byte responseType = buffer.get();
 
         if (responseType != PRODUCE_RESPONSE) {
-            throw new IllegalArgumentException( //HANDLE ERROR RESPONSE
-                "Expected PRODUCE_RESPONSE but received: " + responseType
-            );
+            if (responseType == ERROR_RESPONSE) {
+                short errorLength = buffer.getShort();
+                byte[] errorBytes = new byte[errorLength];
+                buffer.get(errorBytes);
+                String error = new String(errorBytes);
+                return new ProduceResult(-1, error);
+            }
+            return new ProduceResult(-1, "Invalid Response Type");
         }
 
         //Extracts offset and status information
@@ -188,9 +200,14 @@ public class Protocol {
         byte responseType = buffer.get();
 
         if (responseType != FETCH) {
-            throw new IllegalArgumentException(
-                "Expected FETCH but received: " + responseType
-            );
+            if (responseType == ERROR_RESPONSE) {
+                short errorLength = buffer.getShort();
+                byte[] errorBytes = new byte[errorLength];
+                buffer.get(errorBytes);
+                String error = new String(errorBytes);
+                return new FetchResult(new byte[0][], error);
+            }
+            return new FetchResult(new byte[0][], "Invalid Response Type");
         }
 
         int messageCount = buffer.getInt(); //extracts message count
@@ -219,9 +236,14 @@ public class Protocol {
         //skip request response type?
         byte type = buffer.get(); // skip for now
         if (type != METADATA_RESPONSE) {
-            throw new IllegalArgumentException( //HANDLE ERROR RESPONSE
-                "Expected PRODUCE_RESPONSE but received: " + type
-            );
+            if (type == ERROR_RESPONSE) {
+                short errorLength = buffer.getShort();
+                byte[] errorBytes = new byte[errorLength];
+                buffer.get(errorBytes);
+                String error = new String(errorBytes);
+                return new MetadataResult(new ArrayList<>(), new ArrayList<>(), error);
+            }
+            return new MetadataResult(new ArrayList<>(), new ArrayList<>(), "Invalid Response Type");
         }
         //^GOTTA DO SOMETHING
 
@@ -271,7 +293,6 @@ public class Protocol {
     }
 
     
-
     /**
      * 
      * ProduceResult class
