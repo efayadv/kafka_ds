@@ -1,15 +1,10 @@
 package main.java.com.simplekafka.broker;
 
 import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-
-import main.java.com.simplekafka.broker.Protocol.FetchResult;
-import main.java.com.simplekafka.broker.Protocol.MetadataResult;
-import main.java.com.simplekafka.broker.Protocol.PartitionMetadata;
-import main.java.com.simplekafka.broker.Protocol.ProduceResult;
-import main.java.com.simplekafka.broker.Protocol.TopicMetadata;
 
 public class Protocol {
     // Client request types
@@ -25,6 +20,19 @@ public class Protocol {
     public static final byte CREATE_TOPIC_RESPONSE = 0x14;
 
     //internal broker communication
+    public static final byte REPLICATE = 0x21;
+    public static final byte REPLICATE_ACK = 0x22;
+    public static final byte TOPIC_NOTIFICATION = 0x23;
+
+
+    /**
+     * Provides a standardized way to send error responses to clients
+     * @param channel
+     * @param errorMessage
+     */
+    public static void sendErrorResponse(SocketChannel channel, String errorMessage) {
+        
+    }
 
     //ENCODING
     /*
@@ -116,9 +124,39 @@ public class Protocol {
     }
 
     public static ByteBuffer encodeReplicateRequest(String topic, int partition, long offset, byte[] message) {
+        byte[] topicBytes = topic.getBytes(StandardCharsets.UTF_8);
 
+        int size = 
+            1 
+            + 2
+            + topicBytes.length
+            + 4
+            + 8 //offset
+            + 4
+            + message.length;
+
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+        buffer.put(REPLICATE);
+        buffer.putShort((short) topicBytes.length);
+        buffer.put(topicBytes);
+        buffer.putInt(partition);
+        buffer.putLong(offset);
+        buffer.putInt(message.length);
+        buffer.put(message);
+        buffer.flip();
+        return buffer;
     }
-    public static ByteBuffer encodeTopicNotification(String topic) {}
+    public static ByteBuffer encodeTopicNotification(String topic) {
+        byte[] topicBytes = topic.getBytes(StandardCharsets.UTF_8);
+
+        int size = 3 + topicBytes.length;
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+        buffer.put(TOPIC_NOTIFICATION);
+        buffer.putShort((short) topicBytes.length);
+        buffer.put(topicBytes);
+        buffer.flip();
+        return buffer;
+    }
 
     //DECODING
     /*
