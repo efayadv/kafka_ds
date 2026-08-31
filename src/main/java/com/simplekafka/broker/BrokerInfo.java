@@ -1,4 +1,4 @@
-package main.java.com.simplekafka.broker;
+package com.simplekafka.broker;
 
 public class BrokerInfo {
     private final int id;
