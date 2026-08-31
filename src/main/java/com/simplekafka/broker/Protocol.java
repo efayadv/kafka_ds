@@ -2,9 +2,14 @@ package main.java.com.simplekafka.broker;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import main.java.com.simplekafka.broker.Protocol.FetchResult;
+import main.java.com.simplekafka.broker.Protocol.MetadataResult;
+import main.java.com.simplekafka.broker.Protocol.PartitionMetadata;
 import main.java.com.simplekafka.broker.Protocol.ProduceResult;
+import main.java.com.simplekafka.broker.Protocol.TopicMetadata;
 
 public class Protocol {
     // Client request types
@@ -18,6 +23,8 @@ public class Protocol {
     public static final byte FETCH_RESPONSE = 0x12;
     public static final byte METADATA_RESPONSE = 0x13;
     public static final byte CREATE_TOPIC_RESPONSE = 0x14;
+
+    //internal broker communication
 
     //ENCODING
     /*
@@ -108,6 +115,11 @@ public class Protocol {
         return buffer;
     }
 
+    public static ByteBuffer encodeReplicateRequest(String topic, int partition, long offset, byte[] message) {
+
+    }
+    public static ByteBuffer encodeTopicNotification(String topic) {}
+
     //DECODING
     /*
     Decodes a response from a produce request
@@ -158,18 +170,69 @@ public class Protocol {
         return new FetchResult(messages, null);
     }
 
+    /**
+     * decodes response containing cluster metadata
+     * 
+     * @param buffer
+     * @return
+     */
     public static MetadataResult decodeMetadataResponse(ByteBuffer buffer) {
         //Processes broker information (IDs, hosts, ports)
-        int id = buffer.getInt();
-        String host = StandardCharsets.UTF_8.decode(buffer).toString();
-        int port = buffer.getInt();
-        //Processes topic metadata(partitions, leaders, replicas)
+        //skip request response type?
+        byte type = buffer.get(); // skip for now
+        if (type != METADATA_RESPONSE) {
+            throw new IllegalArgumentException( //HANDLE ERROR RESPONSE
+                "Expected PRODUCE_RESPONSE but received: " + type
+            );
+        }
+        //^GOTTA DO SOMETHING
+
+        int brokerCount = buffer.getInt();
+        List<BrokerInfo> brokers = new ArrayList<>();
+
+        for (int i = 1; i < brokerCount; i++) {
+            int id = buffer.getInt();
+            short hostLength = buffer.getShort();
+            byte[] hostBytes = new byte[hostLength];
+            buffer.get(hostBytes);
+            String host = new String(hostBytes);
+            int port = buffer.getInt();
+            brokers.add(new BrokerInfo(id, host, port));
+        }
+
+        int topicCount = buffer.getInt();
+        List<TopicMetadata> topics = new ArrayList<>();
+        
+        for (int i = 1; i < topicCount; i++) {
+            //String name = StandardCharsets.UTF_8.decode(buffer).toString();
+            short nameLength = buffer.getShort();
+            byte[] nameBytes = new byte[nameLength]; //destination array
+            buffer.get(nameBytes);
+            String name = new String(nameBytes);
+
+            int partitionCount = buffer.getInt();
+            List<PartitionMetadata> partitions = new ArrayList<>();
+            for (int j = 1; j < partitionCount; j++) {
+                int partitionId = buffer.getInt();
+                int leader = buffer.getInt();
+                int replicasCount = buffer.getInt();
+                List<Integer> replicaIds = new ArrayList<>();
+                
+                for (int k = 1; k < replicasCount; k++) {
+                    replicaIds.add(buffer.getInt());
+                }
+
+                partitions.add(new PartitionMetadata(partitionId, leader, replicaIds));
+            }
+            topics.add(new TopicMetadata(name, partitions));
+        }
 
 
-
-        //BrokerInfo broker = new BrokerInfo(CREATE_TOPIC_RESPONSE, null, CREATE_TOPIC);
-
+        //should return list of broker info, list of topic metadata w/ partition info, error info
+        return new MetadataResult(brokers, topics, null);
     }
+
+    
 
     /**
      * 
@@ -224,14 +287,76 @@ public class Protocol {
         
     }
 
+    public static class MetadataResult {
+        private final List<BrokerInfo> brokers;
+        private final List<TopicMetadata> topics;
+        private final String error;
+
+        public MetadataResult(List<BrokerInfo> brokers, List<TopicMetadata> topics, String error) {
+            this.brokers = brokers;
+            this.topics = topics;
+            this.error = error;
+        }
+
+        public List<BrokerInfo> getBrokers() {
+            return brokers;
+        }
+
+        public List<TopicMetadata> getTopics() {
+            return topics;
+        }
+
+        public String getError() {
+            return error;
+        }
+
+        public boolean isSuccess() {
+            return error == null;
+        }
+
+    }
+
     public static class TopicMetadata {
-        private final String topic;
-        //partition Metadata
+        private final String name;
+        private final List<PartitionMetadata> partitions;
+
+        public TopicMetadata(String name, List<PartitionMetadata> partitions) {
+            this.name = name;
+            this.partitions = partitions;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public List<PartitionMetadata> getPartitions() {
+            return partitions;
+        }
 
     }
 
     public static class PartitionMetadata {
         private final int id;
+        private final int leader;
+        private final List<Integer> replicas;
+
+        public PartitionMetadata(int id, int leader, List<Integer> replicas) {
+            this.id = id;
+            this.leader = leader;
+            this.replicas = replicas;
+        }
+
+        public int getId() {
+            return id;
+        }
+
+        public int getLeader() {
+            return leader;
+        }
+
+        public List<Integer> getReplicas() {
+            return replicas;
+        }
 
     }
 }
