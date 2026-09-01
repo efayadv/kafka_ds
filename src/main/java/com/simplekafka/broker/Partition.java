@@ -1,8 +1,12 @@
 package com.simplekafka.broker;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -53,7 +57,11 @@ public class Partition {
                     SegmentInfo lastSegment = segments.get(segments.size() - 1);
                     nextOffset.set(lastSegment.getBaseOffset() + countMessagesInSegment(lastSegment));
                 }
+            }
 
+            // Create a new segment if none exists
+            if (segments.isEmpty()) {
+                createNewSegment(0);
             }
 
 
@@ -63,8 +71,60 @@ public class Partition {
         
         
         
-        // Create a new segment if none exists
+        
         // Open the last segment for appending
+    }
+
+
+    private void createNewSegment(long baseOffset) throws IOException {
+        /*
+        File naming convention: Uses a standardized 20-digit format for base offsets, ensuring proper sorting and consistency
+        Dual file creation: Creates both log (.log) and index (.index) files for each segment
+        Segment tracking: Adds the new segment to the in-memory segments list
+        Immediate activation: Opens the new segment for immediate use
+         */
+
+        String baseName = String.format("%020d", baseOffset);
+        String logPath = baseDir + File.separator + baseName + LOG_SUFFIX;
+        String indexPath = baseDir + File.separator + baseName + INDEX_SUFFIX;
+
+        File logFile = new File(logPath);
+        logFile.createNewFile();
+
+        File indexFile = new File(indexPath);
+        indexFile.createNewFile();
+
+        SegmentInfo startSegment = new SegmentInfo(baseOffset, logPath, indexPath);
+        segments.add(startSegment);
+
+        //open segment for use
+        
+    }
+
+    /**
+     * to count messages in segment file
+     * 
+     * @param lastSegment
+     * @return
+     * @throws IOException
+     */
+    public long countMessagesInSegment(SegmentInfo segment) throws IOException {
+        long messagesCount = 0;
+        try (RandomAccessFile logFile = new RandomAccessFile(segment.getLogPath(), "r")) {
+            FileChannel logChannel = logFile.getChannel();
+
+            ByteBuffer buffer = ByteBuffer.allocate(4); //size of a message
+            while (logChannel.position() < logChannel.size()) {
+                buffer.clear();
+                int reading = logChannel.read(buffer);
+                if (reading < 4) break;
+                buffer.flip();
+                int messageSize = buffer.getInt();
+                logChannel.position(logChannel.position() + messageSize);
+                messagesCount++;
+            }
+        }
+        return messagesCount;
     }
 
 
