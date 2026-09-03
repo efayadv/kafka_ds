@@ -62,19 +62,24 @@ public class Partition {
             // Create a new segment if none exists
             if (segments.isEmpty()) {
                 createNewSegment(0);
+            } else {
+                SegmentInfo lastSegment = segments.get(segments.size() - 1);
+                openSegmentForAppend(lastSegment);
             }
 
+            LOGGER.info("Initialized partition " + id + " with " + segments.size() + " segments, next offset: " nextOffset.get());
 
-        } catch () {
-
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to initialize partition " + id, e);
         }
         
-        
-        
-        
+    
         // Open the last segment for appending
     }
 
+    private void openSegmentForAppend(SegmentInfo segment) {
+
+    }
 
     private void createNewSegment(long baseOffset) throws IOException {
         /*
@@ -97,8 +102,11 @@ public class Partition {
         SegmentInfo startSegment = new SegmentInfo(baseOffset, logPath, indexPath);
         segments.add(startSegment);
 
+        openSegmentForAppend(startSegment);
+
+        LOGGER.info("Created new segment for partition " + id + ", base offset: " + baseOffset);
+
         //open segment for use
-        
     }
 
     /**
