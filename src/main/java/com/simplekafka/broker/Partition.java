@@ -1,6 +1,7 @@
 package com.simplekafka.broker;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
@@ -9,11 +10,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class Partition {
     private static final String LOG_SUFFIX = ".log";
     private static final String INDEX_SUFFIX = ".index";
+    private static final Logger LOGGER = Logger.getLogger(Partition.class.getName());
+    private static final int MEGABYTE = 1024 * 1024;
 
     private final int id;                     // Unique partition identifier
     private int leader;                       // Leader broker ID
@@ -67,7 +73,7 @@ public class Partition {
                 openSegmentForAppend(lastSegment);
             }
 
-            LOGGER.info("Initialized partition " + id + " with " + segments.size() + " segments, next offset: " nextOffset.get());
+            LOGGER.info("Initialized partition " + id + " with " + segments.size() + " segments, next offset: " + nextOffset.get());
 
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to initialize partition " + id, e);
@@ -77,8 +83,29 @@ public class Partition {
         // Open the last segment for appending
     }
 
-    private void openSegmentForAppend(SegmentInfo segment) {
+    private void openSegmentForAppend(SegmentInfo segment) throws IOException {
+        /*
+        Resource management: Properly closes any previously active file handles
+        File access mode: Opens files in “rw” (read-write) mode using RandomAccessFile
+        Append positioning: Positions the file pointer at the end to ensure append-only behavior
+        Channel-based I/O: Uses FileChannel for efficient I/O operations
+         */
 
+        //concurrency block? we have to "close" somehow the activeLogFile
+        //there is also activeLogChannel, probably useful
+        if (activeLogChannel != null && activeLogChannel.isOpen()) {
+            activeLogChannel.close();
+        }
+        
+        if (activeLogFile != null) {
+            activeLogFile.close();
+        }
+
+        activeLogFile = new RandomAccessFile(segment.getLogPath(), "rw");
+
+        //appending positioning
+        activeLogChannel = activeLogFile.getChannel();
+        activeLogChannel.position(activeLogChannel.size()); //to the end of file
     }
 
     private void createNewSegment(long baseOffset) throws IOException {
@@ -105,8 +132,6 @@ public class Partition {
         openSegmentForAppend(startSegment);
 
         LOGGER.info("Created new segment for partition " + id + ", base offset: " + baseOffset);
-
-        //open segment for use
     }
 
     /**
@@ -135,6 +160,59 @@ public class Partition {
         return messagesCount;
     }
 
+    public long append(byte[] message) {
+        /*
+        Acquires a write lock to prevent concurrent modifications
+        Checks if current segment is full (exceeds 1MB) and creates a new one if needed
+        Formats message with a 4-byte length prefix
+        Persists data using FileChannel for efficient I/O
+        Forces data to disk to ensure durability
+        Updates the index file with the new offset-position mapping
+        Increments and returns the message offset
+         */
+        lock.writeLock().lock();
+        //checking if segment full, create a new one if it is 
+        try {
+            long currentOffset = nextOffset.get(); // gets the current offset position 
+            if (activeLogChannel.position() >= MEGABYTE) {
+                activeLogChannel.close();
+                activeLogFile.close();
+                createNewSegment(currentOffset); 
+            }
+
+            //we need to add 4 bytes as a prefix to message
+            ByteBuffer buffer = ByteBuffer.allocate(4 + message.length);
+            buffer.putInt(message.length);
+            buffer.put(message);
+            buffer.flip();
+
+            //persisting data using FileChannel
+            long position = activeLogChannel.position();
+            activeLogChannel.write(buffer);
+
+            //forcing data to disk (force(true))
+            activeLogChannel.force(true);
+
+            //updating index file with new offset positioning
+            //.getIndexPath
+            updateIndex();
+
+
+
+        } catch () {
+
+        }
+    
+    }
+
+    private void updateIndex(long offset, long position) {
+        /*
+        Index record format: Stores pairs of 8-byte values (offset + position = 16 bytes per entry)
+        Append-only index: Always positions at the end of the index file, maintaining chronological order
+        Durability: Forces the index to disk with force(true) to ensure persistence
+        Current segment focus: Always updates the index of the most recent segment
+         */
+    }
 
     private static class SegmentInfo {
         private final long baseOffset;
