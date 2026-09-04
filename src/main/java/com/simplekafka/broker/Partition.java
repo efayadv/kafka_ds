@@ -269,9 +269,64 @@ public class Partition {
             //finding exact file position with index
 
             long position = findPositionForOffset(targetSegment, offset);
+            if (position < 0) {
+                return messages;
+            }
+        
+            try (RandomAccessFile logFile = new RandomAccessFile(targetSegment.getLogPath(), "r")) {
+                FileChannel logChannel = logFile.getChannel();
+                //we are reading from position until we reach maxBytes
+                logChannel.position(position);
 
-            try (RandomAccessFile indexFile = new RandomAccessFile(targetSegment.getIndexPath(), "r")) {
-                FileChannel indexChannel = indexFile.getChannel();
+                ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
+                long currentOffset = offset;
+                
+                while (bytesRead < maxBytes && logChannel.position() < logChannel.size()) {
+                    sizeBuffer.clear();
+                    int read = logChannel.read(sizeBuffer);
+                    if (read < 4) break;
+                    sizeBuffer.flip();
+
+                    int messageSize = sizeBuffer.getInt(); //the length of the actual message
+
+                    if (bytesRead + messageSize > maxBytes) {
+                        break;
+                    }
+
+                    //read message 
+                    ByteBuffer messageBuffer = ByteBuffer.allocate(messageSize); //allocating the size of the actual message
+                    int messageRead = logChannel.read(messageBuffer);
+
+                    if (messageRead < messageSize) { //checks if there is an incongruency in message size and actual size
+                        LOGGER.warning("Incomplete message read at offset " + currentOffset);
+                        break;
+                    }
+
+                    messageBuffer.flip();
+
+                    //adding message
+                    byte[] message = new byte[messageSize];
+                    //add content to message[] 
+                    messageBuffer.get(message);
+                    messages.add(message);
+
+                    //update bytesread and positon
+                    bytesRead += messageSize + 4; //4 are the bytes containing size
+                    currentOffset++;
+
+                    //handling crossing segment boundaries.
+                    if (logChannel.position() >= logChannel.size() && currentOffset < nextOffset.get()) { //the offset check is if we are out of message
+                        
+                    }
+                    logChannel.position(logChannel.position() + messageSize);
+
+
+                    //we have to append messages to the list
+                    
+
+                }
+
+                
             }
             
 
