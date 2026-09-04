@@ -8,6 +8,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
@@ -195,14 +196,18 @@ public class Partition {
 
             //updating index file with new offset positioning
             //.getIndexPath
-            updateIndex();
+            updateIndex(currentOffset, position);
 
+            nextOffset.incrementAndGet();
 
+            return currentOffset;
 
-        } catch () {
-
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "Failed to append message to partition " + id, e);
+            return -1;
+        } finally {
+            lock.writeLock().unlock();
         }
-    
     }
 
     private void updateIndex(long offset, long position) {
@@ -236,6 +241,76 @@ public class Partition {
         } catch (IOException e) {
             LOGGER.log(Level.SEVERE, "Failed to update index for partition " + id, e);
         }
+
+    }
+
+    public List<byte[]> readMessages(long offset, int maxBytes) {
+        /*
+        Acquires a read lock (allowing concurrent reads)
+        Locates the segment containing the requested offset
+        Uses the index to find the exact file position for efficient access
+        Reads messages sequentially up to the byte limit
+        Handles crossing segment boundaries seamlessly
+        Returns messages as byte arrays
+         */
+
+        lock.readLock().lock();
+        List<byte[]> messages = new ArrayList<>();
+        int bytesRead = 0;
+
+        try {
+            //locating segment with requested offset
+            //the offset is in the name of the file i think
+            //probably check if directory exists
+            SegmentInfo targetSegment = findSegmentForOffset(offset);
+
+
+        } catch () {
+
+        }
+
+    }
+
+    private SegmentInfo findSegmentForOffset(long offset) {
+        /*
+        Range validation: Checks if the offset is within valid bounds
+        Binary search algorithm: Uses O(log n) search to efficiently find the correct segment
+        Segment boundary logic: Determines if an offset falls between the current segment’s base offset and the next segment’s base offset
+        Special case handling: Has specific logic for the last segment (which doesn’t have an upper bound)
+        */
+
+        //which bounds?
+        if (segments.isEmpty() && offset >= nextOffset.get()) {
+            return null;
+        } 
+
+        int low = 0;
+        int high = segments.size() - 1;
+
+        //binary search alg
+        while (low <= high) {
+            int mid = (low + high) / 2;
+            SegmentInfo segment = segments.get(mid);
+
+            if (mid < segments.size() - 1) {
+                SegmentInfo nextSegment = segments.get(mid + 1);
+                if (offset >= segment.getBaseOffset() && offset < nextSegment.getBaseOffset()) {
+                    return segment;
+                }
+            } else {
+                if (offset >= segment.getBaseOffset()) {
+                    return segment;
+                }
+            }
+
+            if (offset < segment.getBaseOffset()) {
+                high = mid - 1;
+            } else {
+                low = mid + 1;
+            }
+        }
+
+        return null;
 
     }
 
