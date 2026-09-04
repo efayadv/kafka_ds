@@ -263,6 +263,17 @@ public class Partition {
             //the offset is in the name of the file i think
             //probably check if directory exists
             SegmentInfo targetSegment = findSegmentForOffset(offset);
+            if (targetSegment == null) {
+                return messages;
+            }
+            //finding exact file position with index
+
+            long position = findPositionForOffset(targetSegment, offset);
+
+            try (RandomAccessFile indexFile = new RandomAccessFile(targetSegment.getIndexPath(), "r")) {
+                FileChannel indexChannel = indexFile.getChannel();
+            }
+            
 
 
         } catch () {
@@ -311,6 +322,59 @@ public class Partition {
         }
 
         return null;
+
+    }
+
+    private long findPositionForOffset(SegmentInfo segment, long offset) {
+        /*
+        Relative offset calculation: Translates global offsets to segment-relative offsets
+        Direct index lookup: Uses the relative offset to calculate the exact byte position in the index file
+        Special case handling: Handles empty indexes and out-of-range offsets
+        Efficient random access: Uses direct file positioning rather than sequential scanning
+         */
+        //global offset to segment-relative offsets?
+        //nextOffset into offset?
+        try (RandomAccessFile indexFile = new RandomAccessFile(segment.getIndexPath(), "r")) {
+            FileChannel indexChannel = indexFile.getChannel();
+            
+            if (indexChannel.size() == 0) {
+                return 0;
+            }
+
+            //relative offset within file
+
+            long relativeOffset = offset - segment.getBaseOffset(); //exact index position
+
+            // an index entry is 16 bytes
+            long entryCount = indexChannel.size() / 16;
+
+            if (relativeOffset >= entryCount) {
+                //its more than the count therefore it doesnt exists yet
+                indexChannel.position(indexChannel.size() - 16);
+                ByteBuffer buffer = ByteBuffer.allocate(16);
+                indexChannel.read(buffer);
+                //once it reads buffer which is size 16 (en entry) 
+                buffer.flip();
+
+                buffer.getLong(); //one skip so next getLong() lands in entry position
+                return buffer.getLong(); 
+            } 
+
+            //what if relative offset is in indexChannel?
+            //Read specific index entry
+
+            indexChannel.position(relativeOffset * 16); //16 for evry entry
+            ByteBuffer buffer = ByteBuffer.allocate(16);
+            indexChannel.read(buffer);
+            buffer.flip();
+
+            buffer.getLong();
+            return buffer.getLong();
+
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "Failed to find position for offset" + offset, e);
+            return -1;
+        }
 
     }
 
