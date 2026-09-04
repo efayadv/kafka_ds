@@ -212,6 +212,31 @@ public class Partition {
         Durability: Forces the index to disk with force(true) to ensure persistence
         Current segment focus: Always updates the index of the most recent segment
          */
+
+        //find current segment
+        try {
+            if (segments.isEmpty()) return;
+
+            SegmentInfo currentSegment = segments.get(segments.size() - 1);
+
+            try (RandomAccessFile indexFile = new RandomAccessFile(currentSegment.getIndexPath(), "rw")) {
+                FileChannel indexChannel = indexFile.getChannel();
+
+                indexChannel.position(indexChannel.size());
+
+                ByteBuffer buffer = ByteBuffer.allocate(16);
+                buffer.putLong(offset);
+                buffer.putLong(position);
+                buffer.flip();
+
+                indexChannel.write(buffer);
+                indexChannel.force(true);
+            }     
+
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "Failed to update index for partition " + id, e);
+        }
+
     }
 
     private static class SegmentInfo {
