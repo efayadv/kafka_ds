@@ -69,6 +69,9 @@ public class SimpleKafkaBroker {
             //register with zookeper
             registerWithZookeeper();
 
+            //participates in controller election, another method
+            electController();
+
 
 
 
@@ -108,12 +111,70 @@ public class SimpleKafkaBroker {
             //setting up watch on the broker registry
             zkClient.watchChildren("/brokers", this::onBrokersChanged);
 
-
-        } catch () {
-
+            LOGGER.info("Registered with Zookeeper at " + zkClient.getConnectString());
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to register with Zookeeper", e);
         }
         
     }
+
+    private void electController() {
+        /*
+        This method implements a controller election process:
+        Checks if a controller already exists in ZooKeeper
+        Attempts to create a controller node if none exists
+        If successful, becomes the controller and rebalances partitions
+        If not, watches for controller changes
+        Retries after failures with a delay
+         */
+        try {
+            String controllerPath = "/controller";
+
+            //check if controller exists in zookeeper
+            boolean nodeExists = zkClient.exists(controllerPath);
+            if (nodeExists) { //if true, it becomes the controller and rebalances partitions
+                String existingData = zkClient.getData(controllerPath);
+                if (existingData == null || existingData.trim().isEmpty()) {
+                    zkClient.deleteNode(controllerPath);
+                    nodeExists = false;
+                }
+            }
+
+            //create controller
+            boolean becameController = false;
+            if (!nodeExists) {
+                becameController = zkClient.createEphemeralNode(controllerPath, String.valueOf(brokerId));
+            }
+            if (becameController) {
+                isController.set(true);
+                rebalancePartitions();
+            } else {
+                zkClient.watchNode(controllerPath, this:onControllerChange);
+            }
+        
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Controller election failed", e);
+            new Thread(() -> { //stronger implementation would use ScheduleExecutorService
+                try { 
+                    Thread.sleep(2000);
+                    electController();
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }).start(); 
+        }
+    }
+
+    private void rebalancePartitions() {
+        /*
+        Ensures only the controller performs rebalancing
+        Checks each partition for valid leaders
+        Assigns new leaders for partitions with missing leaders
+        Updates follower assignments
+        Updates partition metadata in ZooKeeper
+         */
+    }
+
 
     private void onBrokersChanged(List<String> brokerIds) {
         // Update cluster metadata
