@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -31,6 +32,18 @@ public class Partition {
     private RandomAccessFile activeLogFile;   // Currently active log file
     private FileChannel activeLogChannel;     // Channel for file operations
     private final List<SegmentInfo> segments; // List of segments in the partition
+
+    public Partition(int id, int leader, List<Integer> followers, String baseDir) {
+        this.id = id;
+        this.leader = leader;
+        this.followers = followers;
+        this.baseDir = baseDir;
+        this.nextOffset = new AtomicLong(0);
+        this.lock = new ReentrantReadWriteLock();
+        this.segments = new ArrayList<>();
+
+        initialize();
+    }
         
     private void initialize() {
         // Create directory if needed
@@ -316,25 +329,29 @@ public class Partition {
 
                     //handling crossing segment boundaries.
                     if (logChannel.position() >= logChannel.size() && currentOffset < nextOffset.get()) { //the offset check is if we are out of message
-                        
+                        //we can safely continue
+                        int nextSegmentIndex = segments.indexOf(targetSegment) + 1;
+                        if (nextSegmentIndex < segments.size()) { //checks if it exists
+                            logChannel.close();
+                            logFile.close();
+                            targetSegment = findSegmentForOffset(currentOffset);
+                            RandomAccessFile nextLogFile = new RandomAccessFile(targetSegment.getLogPath(), "r"); //resource leak?
+                            FileChannel nextLogChannel = nextLogFile.getChannel();
+
+                            position = 0; //beginning of next segment
+                            nextLogChannel.position(position);
+                        }
                     }
-                    logChannel.position(logChannel.position() + messageSize);
-
-
-                    //we have to append messages to the list
-                    
-
-                }
-
-                
+                }              
             }
-            
-
-
-        } catch () {
-
+        
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "Failed to read messages from partition: " + id, e);
+        } finally {
+            lock.readLock().unlock();
         }
 
+        return messages;
     }
 
     private SegmentInfo findSegmentForOffset(long offset) {
@@ -431,6 +448,47 @@ public class Partition {
             return -1;
         }
 
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public int getLeader() {
+        return leader;
+    }
+
+    public void setLeader(int leader) {
+        this.leader = leader;
+    }
+
+    public List<Integer> getFollowers() {
+        return new ArrayList<>(followers);
+    }
+
+    public void setFollowers(List<Integer> followers) {
+        this.followers = new ArrayList<>(followers);
+    }
+    
+    public long getLogEndOffset() {
+        return nextOffset.get();
+    }
+
+    public void close() {
+        lock.writeLock().lock();
+        try {
+            if (activeLogChannel != null && activeLogChannel.isOpen()) {
+                activeLogChannel.close();
+            }
+
+            if (activeLogFile != null) {
+                activeLogFile.close();
+            }
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "Failed to close partition resources", e);
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     private static class SegmentInfo {
