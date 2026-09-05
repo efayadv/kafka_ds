@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -173,6 +174,47 @@ public class SimpleKafkaBroker {
         Updates follower assignments
         Updates partition metadata in ZooKeeper
          */
+        //only the controller can perform rebalacing
+        if (!isController.get()) {
+            return;
+        }
+
+        LOGGER.info("Rebalancing partitions across cluster");
+
+        //check each partition for valid leaders
+        for (Map.Entry<String, List<Partition>> entry : topics.entrySet()) {
+            //so each entry contains a string and a list of partitions?
+            //another forloop?
+            String topic = entry.getKey();
+            List<Partition> partitions = entry.getValue();
+
+            for (Partition partition : partitions) {
+                //checking for valid leader (valid?)
+                if (partition.getLeader() == -1 || clusterMetadata.containsKey(partition.getLeader())) {
+                    //assign leader
+                    List<Integer> brokers = new ArrayList<>(clusterMetadata.keySet());
+                    if (!brokers.isEmpty()){ //not empty
+                        int newLeader = brokers.get(0);
+                        partition.setLeader(newLeader);
+
+                        //set other brokers as followers
+                        List<Integer> followers = new ArrayList<>();
+                        for (int i = 1; i < Math.min(brokers.size(), 3); i++) { //feel like i can come up with something better
+                            followers.add(brokers.get(i));
+                        }
+                        partition.setFollowers(followers);
+
+                        //update partition metadata
+                        updatePartitionMetadata(topic, partition);
+                    }
+                }
+            }
+        }
+    }
+
+    private void updatePartitionMetadata(String topic, Partition partition) {
+        
+
     }
 
 
