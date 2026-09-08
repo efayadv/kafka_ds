@@ -76,14 +76,35 @@ public class SimpleKafkaBroker {
             //loading existing topic metadata
             loadTopics();
 
+            //starts accepting client connections
+            executor.submit(this::acceptConnections);
 
         }
+    }
 
+    public void stop() {
+        /*
+        shuts down broker by:
+        Closing the network server socket
+        Closing all partition log files
+        Shutting down the thread pool
+        Closing the ZooKeeper connection
+         */
 
         
-        
-        
+        if (isRunning.compareAndSet(true, false)) {
+            try {
+                LOGGER.info("Stopping SimpleKafka broker...");
 
+                //closing network server socket
+                serverChannel.close();
+
+                //closing all partition log files
+
+            } catch () {
+                
+            }
+        }
     }
 
 
@@ -215,18 +236,36 @@ public class SimpleKafkaBroker {
                 }
             }
 
-            
+            String partitionDir = topicDir + File.separator + id;
+            new File(partitionDir).mkdirs();
 
-            Partition partition = new Partition(id, id, null, topicDir)
+            Partition partition = new Partition(id, leader, followers, partitionDir);
+            partitions.add(partition);
+
+            LOGGER.info("Loaded partition " + id + " for topic " + topic +
+                    ", leader: " + leader + ", followers: " + followers);
         }
 
-        if (zkClient.exists(path))
-        zkClient.getData(topicDir);
+        //adding topic to local
+        topics.put(topic, partitions);
+        LOGGER.info("Successfully loaded topic: " + topic + " with " + partitions.size() + " partitions");
+    }
 
-        //adds topic to local metadata
-        topics.put(topic, )
+    public void loadTopics() {
+        try {
+            List<String> topicNames = zkClient.getChildren("/topics");
 
-        
+            for (String topic : topicNames) {
+                try {
+                    loadTopic(topic);
+                } catch (Exception e) {
+                    LOGGER.log(Level.SEVERE, "Failed to load topic" + topic, e);
+                }
+            }
+            LOGGER.info("Loaded " + topics.size() + " topics");
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to load topics", e);
+        }
     }
 
     private void rebalancePartitions() {
@@ -310,7 +349,7 @@ public class SimpleKafkaBroker {
             // Re-attempt controller election
     }
 
-    public void stop() { ... }
+    
 
     
 }
