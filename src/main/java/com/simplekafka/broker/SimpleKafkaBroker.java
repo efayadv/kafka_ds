@@ -73,7 +73,8 @@ public class SimpleKafkaBroker {
             //participates in controller election, another method
             electController();
 
-
+            //loading existing topic metadata
+            loadTopics();
 
 
         }
@@ -150,7 +151,7 @@ public class SimpleKafkaBroker {
                 isController.set(true);
                 rebalancePartitions();
             } else {
-                zkClient.watchNode(controllerPath, this:onControllerChange);
+                zkClient.watchNode(controllerPath, this::onControllerChange);
             }
         
         } catch (Exception e) {
@@ -164,6 +165,68 @@ public class SimpleKafkaBroker {
                 }
             }).start(); 
         }
+    }
+
+    private void loadTopic(String topic) throws Exception {
+        /*
+        Checks if topic already exists locally
+        Verifies topic exists in ZooKeeper
+        Creates local directory structure for the topic
+        Reads partition metadata from ZooKeeper
+        Creates partition objects with leader and follower information
+        Adds topic to local metadata
+         */
+        //checking existance locally
+        if (topics.containsKey(topic)) {
+            LOGGER.info("Topic already loaded: " + topic);
+            return;
+        }
+        String path = "/topics/" + topic;
+        if (!zkClient.exists(path)) {
+            throw new Exception("Topic does not exist in Zookeeper: " + topic);
+        }
+
+        //creating local directory structure for topic
+        String topicDir = DATA_DIR + File.separator + brokerId + File.separator + topic;
+        new File(topicDir).mkdirs();
+
+        //reading partition metadata from zk
+        List<String> partitionIds = zkClient.getChildren(path + "/partitions");
+        List<Partition> partitions = new ArrayList<>();
+
+        for (String partitionId : partitionIds) {
+            //gotta parse them into partitions
+            int id = Integer.parseInt(partitionId);
+            String partitionPath = path + "/partitions/" + partitionId;
+            String partitionData = zkClient.getData(partitionPath);
+            //extract leader and followers
+            String[] elements = partitionData.split(";");
+            int leader = Integer.parseInt(elements[0]);
+
+            List<Integer> followers = new ArrayList<>();
+            if (elements.length > 1 && !elements[1].isEmpty()) {
+                String[] followerIds = elements[1].split(";");
+                for (String follower : followerIds) {
+                    //parse the follower to int before adding to followers list
+                    if (!follower.isEmpty()) {
+                        int f = Integer.parseInt(follower);
+                        followers.add(f);
+                    }
+                }
+            }
+
+            
+
+            Partition partition = new Partition(id, id, null, topicDir)
+        }
+
+        if (zkClient.exists(path))
+        zkClient.getData(topicDir);
+
+        //adds topic to local metadata
+        topics.put(topic, )
+
+        
     }
 
     private void rebalancePartitions() {
@@ -206,6 +269,12 @@ public class SimpleKafkaBroker {
 
                         //update partition metadata
                         updatePartitionMetadata(topic, partition);
+
+                        LOGGER.info("Reassigned partition " + partition.getId() +
+                            " of topic " + topic +
+                            " with leader " + newLeader + 
+                            " with followers " + followers
+                        );
                     }
                 }
             }
@@ -213,8 +282,23 @@ public class SimpleKafkaBroker {
     }
 
     private void updatePartitionMetadata(String topic, Partition partition) {
+        //update it in Zookeeper
+        try {
+            String path = "/topics/" + topic + "/partitions/" + partition.getId();
+            String data = partition.getLeader() + ";";
+            for (int follower : partition.getFollowers()) {
+                data += follower + ";";
+            }
+            if (zkClient.exists(path)) {
+                zkClient.setData(path, data);
+            } else {
+                //create node?
+                zkClient.createPersistentNode(path, data); 
+            }
         
-
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to update partition metadata", e);
+        }
     }
 
 
