@@ -811,6 +811,58 @@ public class SimpleKafkaBroker {
 
     }
 
+    private void handleReplicateRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+        short topicLength = buffer.getShort();
+        byte[] topicBytes = new byte[topicLength];
+        buffer.get(topicBytes);
+        String topic = new String(topicBytes);
+
+        int partitionId = buffer.getInt();
+        long offset = buffer.getLong();
+        int messageSize = buffer.getInt();
+        byte[] message = new byte[messageSize];
+        buffer.get(message);
+
+        LOGGER.info("Replication request for topic: " + topic + ", partition: " + partitionId + ", offset: " + offset);
+
+        // Check if topic exists
+        if (!topics.containsKey(topic)) {
+            ByteBuffer response = ByteBuffer.allocate(1);
+            response.put((byte) 0); // Failed
+            response.flip();
+            clientChannel.write(response);
+            return;
+        }
+
+        // Find the partition
+        List<Partition> partitions = topics.get(topic);
+        Partition targetPartition = null;
+
+        for (Partition p : partitions) {
+            if (p.getId() == partitionId) {
+                targetPartition = p;
+                break;
+            }
+        }
+
+        if (targetPartition == null) {
+            ByteBuffer response = ByteBuffer.allocate(1);
+            response.put((byte) 0); // Failed
+            response.flip();
+            clientChannel.write(response);
+            return;
+        }
+
+        // Append message to log (as follower)
+        long appendedOffset = targetPartition.append(message);
+
+        // Send acknowledgment
+        ByteBuffer response = ByteBuffer.allocate(1);
+        response.put(Protocol.REPLICATE_ACK);
+        response.flip();
+        clientChannel.write(response);
+    }
+
     private void handleFetchRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
         // Parse request data
         // Check if topic exists
