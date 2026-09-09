@@ -564,11 +564,120 @@ public class SimpleKafkaBroker {
 
         //check if broker is leader for partition
         if (targetPartition.getLeader() != brokerId) {
+            //send request to broker that is leader
             forwardProduceToLeader(clientChannel, topic, partition, message, targetPartition.getLeader());
             return;
         }
 
-        
+        //append message to log
+        long offset = targetPartition.append(message);
+
+        //replicate to followers
+        replicateToFollowers(topic, targetPartition, message, offset);
+
+
+    }
+
+
+    private void forwardProduceToLeader(SocketChannel clientChannel, String topic, int partition,
+            byte[] message, int leaderId) throws IOException { 
+                // Locate leader broker using metadata
+                // Connect to leader
+                // Send equivalent produce request
+                // Receive leader's response
+                // Return that response to the original client
+            
+                BrokerInfo leader = clusterMetadata.get(leaderId);
+                if (leader == null) {
+                    Protocol.sendErrorResponse(clientChannel, "Leader broker not available");
+                    return;
+                }
+
+                //connecting to leader
+                try (SocketChannel leaderChannel = SocketChannel.open()) {
+                    leaderChannel.connect(new InetSocketAddress(leader.getHost(), leader.getPort()));
+
+                    //prepare equivalent produce request
+                    ByteBuffer request = ByteBuffer.allocate(9 + topic.length() + message.length);
+                    request.put(Protocol.PRODUCE);
+                    request.putShort((short) topic.length());
+                    request.put(topic.getBytes());
+                    request.putInt(partition);
+                    request.putInt(message.length);
+                    request.put(message);
+                    request.flip();
+
+                    //send
+                    leaderChannel.write(request);
+
+                    //Read response
+                    ByteBuffer response = ByteBuffer.allocate(10);
+                    leaderChannel.read(response);
+                    response.flip();
+
+                    //forward to client
+                    clientChannel.write(response);
+                } catch (IOException e) {
+                    LOGGER.log(Level.SEVERE, "Failed to forward produce request to leader", e);
+                    Protocol.sendErrorResponse(clientChannel, "Failed to forward to leader");
+                }
+    }
+
+    private void replicateToFollowers(String topic, Partition partition, byte[] message, long offset) {
+        // Prepare replication request
+        // Send request to follower
+        // Read acknowledgment
+
+        //from protocol encodeReplicateRequest
+
+        //we need to get followers
+        for (int followerId : partition.getFollowers()) {
+            if (followerId == brokerId) {
+                continue; //skip self
+            }
+
+            //maybe check if any followers at all?
+            BrokerInfo follower = clusterMetadata.get(followerId);
+            if (follower == null) {
+                continue;
+            }
+
+            //connecting to follower
+            executor.submit(() -> {
+                try (SocketChannel followerChannel = SocketChannel.open()) {
+                    followerChannel.connect(new InetSocketAddress(follower.getHost(), follower.getPort()));
+
+                    //prepare replicate request
+                    ByteBuffer request = ByteBuffer.allocate(17 + topic.length() + message.length);
+                    request.put(Protocol.REPLICATE);
+                    request.putShort((short) topic.length());
+                    request.put(topic.getBytes());
+                    request.putInt(partition.getId());
+                    request.putLong(offset);
+                    request.putInt(message.length);
+                    request.put(message);
+                    request.flip();
+
+                    //send
+                    followerChannel.write(request);
+
+                    //get reponse
+                    ByteBuffer response = ByteBuffer.allocate(1);
+                    followerChannel.read(response);
+                    response.flip();
+
+                    byte acknowledgment = response.get();  
+                    LOGGER.info("Replication to follower " + followerId + " " +
+                            (acknowledgment == Protocol.REPLICATE_ACK ? "succeeded" : "failed"));
+                } catch (IOException e) {
+                    LOGGER.log(Level.SEVERE, "Replication to follower " + followerId + " failed", e);
+                }
+
+            });
+
+        }
+
+
 
     }
     
