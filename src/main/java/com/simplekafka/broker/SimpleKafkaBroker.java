@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.nio.channels.ServerSocketChannel;
 import java.util.logging.Level;
@@ -19,9 +20,9 @@ public class SimpleKafkaBroker {
     private static final Logger LOGGER = Logger.getLogger(SimpleKafkaBroker.class.getName());
     private static final String DATA_DIR = "data";
 
-    private static final int brokerId;
-    private static final String brokerHost;
-    private static final int brokerPort;
+    private final int brokerId;
+    private final String brokerHost;
+    private final int brokerPort;
     private final AtomicBoolean isRunning;
     private final AtomicBoolean isController;
     private final ExecutorService executor;
@@ -100,13 +101,25 @@ public class SimpleKafkaBroker {
                 serverChannel.close();
 
                 //closing all partition log files
+                for (List<Partition> partitions : topics.values()) {
+                    for (Partition partition : partitions) {
+                        partition.close();
+                    }
+                }
 
-            } catch () {
-                
-            }
+                //shutting down thread pool
+                executor.shutdown();
+                executor.awaitTermination(5, TimeUnit.SECONDS);
+
+                //Close Zk connection
+                zkClient.close();
+
+                LOGGER.info("SimpleKafka Broker stopped"); //change name?
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Failed to stop broker", e);
+            }   
         }
     }
-
 
     private SocketAddress InetSocketAddress(String brokerhost2, int brokerport2) {
         // TODO Auto-generated method stub
@@ -347,6 +360,51 @@ public class SimpleKafkaBroker {
         // Re-elect controller if needed
             // As controller, rebalance partitions due to cluster changes
             // Re-attempt controller election
+        
+        //updating local metadata w new brokers
+        //clusterMetadata takes in Integer (brokerId) and BrokerInfo (broker intself)
+
+        //since it is a callback we start with a message
+        LOGGER.info("Broker changed detected. Current brokers: " + brokerIds);
+
+        for (String brokerId : brokerIds) {
+            //check if it exists first?
+            try {
+                //look for the metadata in Zk
+                if (clusterMetadata.containsKey(Integer.parseInt(brokerId))) {
+                    String brokerPath = "/brokers/" + brokerId;
+                    String brokerData = zkClient.getData(brokerPath);
+                    //build a BrokerInfo
+                    String[] elements = brokerData.split(":");
+
+                    int port = Integer.parseInt(elements[1]);
+
+                    BrokerInfo broker = new BrokerInfo(Integer.parseInt(brokerId), elements[0], port);
+                
+                    clusterMetadata.put(Integer.parseInt(brokerId), broker);
+                    LOGGER.info("Added broker: " + broker);
+                } 
+
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "Failed to process broker info", e);
+            }
+        }
+
+        //remove brokers that have disappeared
+        List<Integer> unavailable = new ArrayList<>();
+        for (Integer brokerId : clusterMetadata.keySet()) {
+            if (!brokerIds.contains(String.valueOf(brokerId))) {
+                unavailable.add(brokerId);
+            }
+        }
+
+        for (Integer brokerId : unavailable) {
+            clusterMetadata.remove(brokerId);
+            LOGGER.info("Removed broker: " + brokerId);
+        }
+
+        
+
     }
 
     
