@@ -34,7 +34,6 @@ public class SimpleKafkaBroker {
     private final ConcurrentHashMap topics;
     private final ServerSocketChannel serverChannel;
     private final Map<Integer, BrokerInfo> clusterMetadata;
-    //gotta add the rest
 
     public SimpleKafkaBroker(int brokerId, String host, int port, int zkPort) throws IOException {
         this.brokerId = brokerId;
@@ -130,7 +129,7 @@ public class SimpleKafkaBroker {
         throw new UnsupportedOperationException("Unimplemented method 'InetSocketAddress'");
     }
 
-    private void registerWithZookeeper() throws IOException, InterruptedException {
+    private void registerWithZookeeper() {
         /*
         Connects to ZooKeeper
         Creates an ephemeral node for this broker (ephemeral nodes disappear when the connection is lost)
