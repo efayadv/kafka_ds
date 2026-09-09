@@ -158,6 +158,61 @@ public class SimpleKafkaBroker {
         
     }
 
+    private void acceptConnections() {
+        while (isRunning.get()) {
+            try {
+                SocketChannel clientChannel = serverChannel.accept();
+                if (clientChannel != null) {
+                    clientChannel.configureBlocking(false);
+                    LOGGER.info("Accepted connection from " + clientChannel.getRemoteAddress());
+
+                    // Handle client connection in a separate thread
+                    executor.submit(() -> handleClient(clientChannel));
+                }
+
+                Thread.sleep(100); // Small pause to prevent CPU spin
+            } catch (Exception e) {
+                if (isRunning.get()) {
+                    LOGGER.log(Level.SEVERE, "Error accepting connection", e);
+                }
+            }
+        }
+    }
+
+    private void handleClient(SocketChannel clientChannel) {
+        try {
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
+
+            while (clientChannel.isOpen() && isRunning.get()) {
+                buffer.clear();
+                int bytesRead = clientChannel.read(buffer);
+
+                if (bytesRead > 0) {
+                    buffer.flip();
+                    processClientMessage(clientChannel, buffer);
+                } else if (bytesRead < 0) {
+                    clientChannel.close();
+                    break;
+                }
+
+                Thread.sleep(50);
+            }
+
+        } catch (Exception e) {
+            if (isRunning.get()) {
+                LOGGER.log(Level.SEVERE, "Error handling client", e);
+            }
+        } finally {
+            try {
+                if (clientChannel.isOpen()) {
+                    clientChannel.close();
+                }
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "Error closing client channel", e);
+            }
+        }
+    }
+
     private void electController() {
         /*
         This method implements a controller election process:
@@ -189,6 +244,23 @@ public class SimpleKafkaBroker {
                 isController.set(true);
                 rebalancePartitions();
             } else {
+                String controllerId = zkClient.getData(controllerPath);
+                if (controllerId == null || controllerId.trim().isEmpty()) {
+                    LOGGER.warning("Controller node exists but has no data. This is unexpected.");
+                    // Try again after a delay
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(1000);
+                            electController();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }).start();
+                    return;
+                }
+                
+                LOGGER.info("Current controller is broker " + controllerId);
+
                 zkClient.watchNode(controllerPath, this::onControllerChange);
             }
         
