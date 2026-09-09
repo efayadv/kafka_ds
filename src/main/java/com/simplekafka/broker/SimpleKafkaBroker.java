@@ -495,6 +495,57 @@ public class SimpleKafkaBroker {
 
     }
 
+    private void processClientMessage(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+        byte messageType = buffer.get();
+
+        switch (messageType) {
+            case Protocol.PRODUCE:
+                handleProduceRequest(clientChannel, buffer);
+                break;
+            case Protocol.FETCH:
+                handleFetchRequest(clientChannel, buffer);
+                break;
+            case Protocol.METADATA:
+                handleMetadataRequest(clientChannel, buffer);
+                break;
+            case Protocol.CREATE_TOPIC:
+                handleCreateTopicRequest(clientChannel, buffer);
+                break;
+            case Protocol.REPLICATE:
+                handleReplicateRequest(clientChannel, buffer);
+                break;
+            case Protocol.TOPIC_NOTIFICATION:
+                handleTopicNotification(clientChannel, buffer);
+                break;
+            default:
+                LOGGER.warning("Unknown message type: " + messageType);
+                Protocol.sendErrorResponse(clientChannel, "Unknown message type");
+        }
+    }
+
+    private void handleTopicNotification(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+        short topicLength = buffer.getShort();
+        byte[] topicBytes = new byte[topicLength];
+        buffer.get(topicBytes);
+        String topic = new String(topicBytes);
+
+        LOGGER.info("Received topic notification for: " + topic);
+
+        try {
+            ByteBuffer ack = ByteBuffer.allocate(1);
+            ack.get((byte) 0);
+            ack.flip();
+            clientChannel.write(ack);
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to load topic: " + topic, e);
+
+            ByteBuffer ack = ByteBuffer.allocate(1);
+            ack.get((byte) 1);
+            ack.flip();
+            clientChannel.write(ack);
+        }
+    }
+
     private void notifyBrokerForTopicCreation(int brokerId, String topic) { 
         BrokerInfo broker = clusterMetadata.get(brokerId);
         if (broker == null)
@@ -904,6 +955,31 @@ public class SimpleKafkaBroker {
         } catch (IOException e) {
             LOGGER.log(Level.SEVERE, "Failed to forward create topic request to controller", e);
             Protocol.sendErrorResponse(clientChannel, "Failed to forward to controller");
+        }
+    }
+
+    public static void main(String[] args) {
+        if (args.length < 3) {
+            System.out.println("Usage: SimpleKafkaBroker <brokerId> <host> <port> [zkPort]");
+            System.exit(1);
+        }
+
+        try {
+            int brokerId = Integer.parseInt(args[0]);
+            String host = args[1];
+            int port = Integer.parseInt(args[2]);
+            int zkPort = args.length > 3 ? Integer.parseInt(args[3]) : 2181;
+
+            SimpleKafkaBroker broker = new SimpleKafkaBroker(brokerId, host, port, zkPort);
+            broker.start();
+
+            //shutdown hook
+            Runtime.getRuntime().addShutdownHook(new Thread(broker::stop));
+
+            System.out.println("SimpleKafka broker started. Press Ctrl+C to stop.");
+        
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to start broker", e);
         }
     }
 
