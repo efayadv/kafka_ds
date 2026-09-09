@@ -13,6 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -403,11 +404,107 @@ public class SimpleKafkaBroker {
             LOGGER.info("Removed broker: " + brokerId);
         }
 
-        
+        //Reelect controller if needed
+        if (!brokerIds.contains(String.valueOf(brokerId)) && isController.get()) {
+            isController.set(false);
+            LOGGER.info("This broker is no longer in the cluster, giving up controller status");
+        } else if (isController.get()) {
+            rebalancePartitions();
+        } else {
+            electController();
+        }
+    }
+
+    private void createTopic(String topic, int numPartitions, short replicationFactor) {
+        // Create topic directory
+        // Create topic in ZooKeeper
+        // Create partitions
+            // Select leader and followers
+            // Create partition
+            // Store partition metadata in ZooKeeper
+        // Add topic to broker's metadata
+        // Notify all brokers to load the topic
+
+        if (!isController.get()) {
+            LOGGER.info("Only the controller can create topics");
+            return;
+        }
+
+        try {
+            String topicDir = DATA_DIR + File.separator + brokerId + File.separator + topic;
+            new File(topicDir).mkdirs();
+
+            //create in Zk
+            String path = "/topics/" + topic;
+            if (!zkClient.exists(path)) {
+                zkClient.createPersistentNode(path, ""); //persistent bc ...
+                zkClient.createPersistentNode(path + "/partitions", "");
+            }
+            
+            //create partitions
+            List<Partition> partitions = new ArrayList<>();
+            List<Integer> brokerIds = new ArrayList<>(clusterMetadata.keySet());
+            for (int i = 0; i < numPartitions; i++) {
+                int partitionId = i;
+                String partitionDir = topicDir + File.separator + partitionId;
+                new File(partitionDir).mkdirs();
+                //select leader
+                int leaderIndex = i % brokerIds.size();
+                int leaderId = brokerIds.get(leaderIndex); 
+
+                //followers
+                List<Integer> followers = new ArrayList<>();
+                for (int j = 0; j < replicationFactor; j++) {
+                    int followerIndex = (leaderIndex + j) % brokerIds.size();
+                    followers.add(brokerIds.get(followerIndex));
+                }
+
+                Partition partition = new Partition(i, leaderId, followers, partitionDir);
+                partitions.add(partition);
+
+                //store in Zk
+                String partitionPath = path + "/partitions/" + partitionId;
+                String partitionData = leaderId + ";";
+                for (int follower : followers) {
+                    partitionData += follower + ",";
+                }
+
+                zkClient.createPersistentNode(partitionPath, partitionData);
+
+                LOGGER.info("Created partition " + partitionId +
+                        " for topic " + topic +
+                        " with leader " + leaderId +
+                        " and followers " + followers);
+            } 
+
+            //add topic to brokers metadata
+            topics.put(topic, partitions);
+
+            //Notify brokers to load topic
+            for (int brokerId : brokerIds) {
+                if (brokerId != this.brokerId) {
+                    notifyBrokerForTopicCreation(brokerId, topic);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to create topic", e);
+        }
 
     }
 
-    
+    private void notifyBrokerForTopicCreation(int brokerId, String topic) { 
+        BrokerInfo broker = clusterMetadata.get(brokerId);
+        if (broker == null)
+            return;
 
+        executor.submit(() -> {
+            try (SocketChannel brokerChannel = SocketChannel.open()) {
+
+
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, "Failed to notify broker " + brokerId + " about topic creation", e);
+            }
+        });
+    }
     
 }
