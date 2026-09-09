@@ -822,7 +822,89 @@ public class SimpleKafkaBroker {
     }
 
     private void handleCreateTopicRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
-        
+        short topicLength = buffer.getShort();
+        byte[] topicBytes = new byte[topicLength];
+        buffer.get(topicBytes);
+        String topic = new String(topicBytes);
+
+        int numPartitions = buffer.getInt();
+        short replicationFactor = buffer.getShort();
+
+        LOGGER.info("Create topic request: " + topic +
+                ", partitions: " + numPartitions +
+                ", replication: " + replicationFactor);
+
+        //check if topic already exists
+        if (topics.containsKey(topic)) {
+            Protocol.sendErrorResponse(clientChannel, "Topic already exists");
+            return;
+        }
+
+        //validate parameters
+        if (numPartitions <= 0 || replicationFactor <= 0 || replicationFactor > clusterMetadata.size()) {
+            Protocol.sendErrorResponse(clientChannel, "Invalid Topic Configuration");
+            return;
+        }
+
+        // as controller, create topic
+        if (isController.get()) {
+            createTopic(topic, numPartitions, replicationFactor);
+
+            //send success response
+            ByteBuffer response = ByteBuffer.allocate(2);
+            response.put(Protocol.CREATE_TOPIC_RESPONSE);
+            response.put((byte) 0);
+            response.flip();
+            clientChannel.write(response);
+        } else {
+            forwardCreateTopicToController(clientChannel, topic, numPartitions, replicationFactor);
+        }
+    }
+
+    private void forwardCreateTopicToController(SocketChannel clientChannel, String topic,
+            int numPartitions, short replicationFactor) throws IOException {
+
+        //find controller
+        int controllerId = -1;
+        try {
+            String controllerData = zkClient.getData("/controller");
+            controllerId = Integer.parseInt(controllerData);
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to get controller info", e);
+            Protocol.sendErrorResponse(clientChannel, "Controller not available");
+            return;
+        }
+
+        BrokerInfo controller = clusterMetadata.get(controllerId);
+        if (controller == null) {
+            Protocol.sendErrorResponse(clientChannel, "Controller not available");
+            return;
+        }
+
+        try (SocketChannel controllerChannel = SocketChannel.open()) {
+            controllerChannel.connect(new InetSocketAddress(controller.getHost(), controller.getPort()));
+
+            ByteBuffer request = ByteBuffer.allocate(9 + topic.length());
+            request.put(Protocol.CREATE_TOPIC);
+            request.putShort((short) topic.length());
+            request.put(topic.getBytes());
+            request.putInt(numPartitions);
+            request.putShort(replicationFactor);
+            request.flip();
+
+            // send request to controller
+            controllerChannel.write(request);
+
+            //read
+            ByteBuffer response = ByteBuffer.allocate(2);
+            controllerChannel.read(response);
+            response.flip();
+
+            clientChannel.write(response);
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "Failed to forward create topic request to controller", e);
+            Protocol.sendErrorResponse(clientChannel, "Failed to forward to controller");
+        }
     }
 
 }
