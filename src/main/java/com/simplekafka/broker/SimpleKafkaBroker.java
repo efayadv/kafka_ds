@@ -12,6 +12,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.logging.Level;
@@ -499,12 +500,76 @@ public class SimpleKafkaBroker {
 
         executor.submit(() -> {
             try (SocketChannel brokerChannel = SocketChannel.open()) {
+                brokerChannel.connect(new InetSocketAddress(broker.getHost(), broker.getPort()));
 
+                ByteBuffer request = ByteBuffer.allocate(3 + topic.length());
+                request.put(Protocol.TOPIC_NOTIFICATION);
+                request.putShort((short) topic.length());
+                request.put(topic.getBytes());
+                request.flip();
 
+                brokerChannel.write(request);
+
+                ByteBuffer response = ByteBuffer.allocate(1);
+                brokerChannel.read(response);
             } catch (IOException e) {
                 LOGGER.log(Level.WARNING, "Failed to notify broker " + brokerId + " about topic creation", e);
             }
         });
+    }
+
+    private void handleProduceRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+        // Parse request data
+        // Check if topic exists
+        // Find the partition
+        // Check if this broker is the leader for the partition
+            // Forward to leader
+        // Append message to log
+        // Replicate to followers
+        // Send acknowledgment to client
+
+        //parsing topic, partition, message
+        short topicLength = buffer.getShort();
+        byte[] topicBytes = new byte[topicLength];
+        buffer.get(topicBytes);
+        String topic = new String(topicBytes);
+
+        int partition = buffer.getInt();
+        int messageSize = buffer.getInt();
+        byte[] message = new byte[messageSize];
+        buffer.get(message);
+
+        LOGGER.info("Produce request for topic: " + topic + ", partition: " + partition);
+
+        if (!topics.containsKey(topic)) {
+            Protocol.sendErrorResponse(clientChannel, "Topic does not exist");
+            return;
+        }
+
+        //find partition
+        List<Partition> partitions = topics.get(topic);
+        Partition targetPartition = null;
+
+        for (Partition p : partitions) {
+            if (p.getId() == partition) {
+                targetPartition = p;
+                break;
+            }
+        }
+
+        if (targetPartition == null) {
+            Protocol.sendErrorResponse(clientChannel, "Partition does not exist");
+            return;
+        }
+
+        //check if broker is leader for partition
+        if (targetPartition.getLeader() != brokerId) {
+            forwardProduceToLeader(clientChannel, topic, partition, message, targetPartition.getLeader());
+            return;
+        }
+
+        
+
     }
     
 }
