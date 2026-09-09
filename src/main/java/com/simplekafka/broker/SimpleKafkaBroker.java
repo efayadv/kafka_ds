@@ -18,6 +18,8 @@ import java.nio.channels.SocketChannel;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import io.netty.buffer.ByteBuf;
+
 public class SimpleKafkaBroker {
     private static final Logger LOGGER = Logger.getLogger(SimpleKafkaBroker.class.getName());
     private static final String DATA_DIR = "data";
@@ -575,6 +577,13 @@ public class SimpleKafkaBroker {
         //replicate to followers
         replicateToFollowers(topic, targetPartition, message, offset);
 
+        //send ack to client
+        ByteBuffer response = ByteBuffer.allocate(10);
+        response.put(Protocol.PRODUCE_RESPONSE);
+        response.putLong(offset);
+        response.put((byte) (offset > -1 ? 0 : 1)); //1 is error
+        response.flip();
+        clientChannel.write(response);
 
     }
 
@@ -677,8 +686,143 @@ public class SimpleKafkaBroker {
 
         }
 
+    }
 
+    private void handleFetchRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+        // Parse request data
+        // Check if topic exists
+        // Find the partition
+        // Check if the offset is valid
+            // No messages available at this offset
+        // Read messages from log
+        // Send response
+                // 1 byte for response type, 4 bytes for message count
+        // 8 bytes for offset, 4 bytes for length, plus message bytes
+        short topicLength = buffer.getShort();
+        byte[] topicBytes = new byte[topicLength];
+        buffer.get(topicBytes);
+        String topic = new String(topicBytes);
+
+        //partition
+        int partition = buffer.getInt();
+        long offset = buffer.getLong();
+        int maxBytes = buffer.getInt();
+
+        LOGGER.info("Fetch request for topic: " + topic + ", partition: " + partition +
+                ", offset: " + offset + ", maxBytes: " + maxBytes);
+
+        List<Partition> partitions = topics.get(topic);
+        Partition targetPartition = null;
+
+        for (Partition p : partitions) {
+            if (p.getId() == partition) {
+                targetPartition = p;
+                break;
+            }
+        }
+
+        if (targetPartition == null) {
+            Protocol.sendErrorResponse(clientChannel, "Partition does not exist");
+            return;
+        }
+
+        //checking if offset is valid?
+        if (offset >= targetPartition.getLogEndOffset()) { //check if offset is the end of log
+            //therefore, no messages available
+            ByteBuffer response = ByteBuffer.allocate(5); // 1 for type 4 for message
+            response.put(Protocol.FETCH_RESPONSE);
+            response.putInt(0);
+            response.flip();
+            clientChannel.write(response);
+            return;
+        }
+
+        List<byte[]> messages = targetPartition.readMessages(offset, maxBytes);
+        
+        int msgsSize = 0;
+        for (byte[] msg : messages) {
+            msgsSize += 12 + msg.length; //8 bytes offset, 4 for message length, plus message
+        }
+
+        ByteBuffer response = ByteBuffer.allocate(5 + msgsSize); //1 response type + 4 of message count
+        response.put(Protocol.FETCH_RESPONSE);
+        response.putInt(messages.size());
+
+        long currentOffset = offset;
+        for (byte[] msg : messages) {
+            response.putLong(currentOffset);
+            response.putInt(msg.length);
+            response.put(msg);
+            currentOffset++;
+        }
+
+        response.flip();
+        clientChannel.write(response);
 
     }
-    
+
+    private void handleMetadataRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+        int size = 5; //1 for response type, 4 for topic count
+
+        //calculate size for topic metadata
+        for (Map.Entry<String, List<Partition>> entry : topics.entrySet()) {
+            size += 6 + entry.getKey().length(); //2 bytes for length, 4 for partition count
+
+            size += entry.getValue().size() * 12;
+
+            for (Partition partition : entry.getValue()) {
+                size += partition.getFollowers().size() * 4; //4 bytes per followerID
+            }
+        }
+
+        //add size for brokers metadata
+        size += 4; //broker count
+        size += clusterMetadata.size() * 10; //4 bytes for brokerId, 2 bytes for broker host length, 4 bytes for port
+
+        for (BrokerInfo broker : clusterMetadata.values()) {
+            size += broker.getHost().length();
+        }
+
+        //we can now start processing response
+        ByteBuffer response = ByteBuffer.allocate(size);
+        response.put(Protocol.METADATA_RESPONSE);
+
+        //broker metadata
+        response.putInt(clusterMetadata.size());
+        for (BrokerInfo broker : clusterMetadata.values()) {
+            response.putInt(broker.getId());
+            response.putShort((short) broker.getHost().length());
+            response.put(broker.getHost().getBytes());
+            response.putInt(broker.getPort());
+        }
+
+        // add topic metadata
+        response.putInt(topics.size());
+        for (Map.Entry<String, List<Partition>> entry : topics.entrySet()) {
+            String topic = entry.getKey();
+            List<Partition> partitions = entry.getValue();
+
+            response.putShort((short) topic.length());
+            response.put(topic.getBytes());
+            response.putInt(partitions.size());
+
+            for (Partition partition : partitions) {
+                response.putInt(partition.getId());
+                response.putInt(partition.getLeader());
+                List<Integer> followers = partition.getFollowers();
+                response.putInt(followers.size());
+                for (Integer follower : followers) {
+                    response.putInt(follower);
+                }
+            }
+        }
+
+        response.flip();
+        clientChannel.write(response);
+    }
+
+    private void handleCreateTopicRequest(SocketChannel clientChannel, ByteBuffer buffer) throws IOException {
+        
+    }
+
 }
