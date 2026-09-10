@@ -8,22 +8,22 @@ This is a small version made to educate myself on distributed systems.
 
 * Custom binary wire protocol built with Java ByteBuffer
 
-Topic and partition-based message organization
+* Topic and partition-based message organization
 
-Append-only partition logs stored in segments
+* Append-only partition logs stored in segments
 
-Offset-based message reads
+* Offset-based message reads
 
-Index entries that map offsets to positions in log files
+* Index entries that map offsets to positions in log files
 
-ZooKeeper-based broker registration and discovery
+* ZooKeeper-based broker registration and discovery
 
-Ephemeral ZooKeeper nodes for broker liveness
+* Ephemeral ZooKeeper nodes for broker liveness
 
-Controller election through ZooKeeper
+* Controller election through ZooKeeper
 
-Partition leader and follower assignments
+* Partition leader and follower assignments
 
-Message replication between brokers
+* Message replication between brokers
 
-Java producer and consumer clients
+* Java producer and consumer clients
