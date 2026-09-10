@@ -12,6 +12,7 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -204,9 +205,85 @@ public class SimpleKafkaClient {
     }
     public List<byte[]> fetch(String topic, int partition, long offset, int maxBytes) throws IOException {
         // Fetch messages from a topic-partition
-        return new ArrayList<>(); // Placeholder
+        if (!topicMetadata.containsKey(topic)) {
+            refreshMetadata();
+            if (!topicMetadata.containsKey(topic)) {
+                throw new IOException("Topic not found: " + topic);
+            }
+        }
+
+        //find leader of partition
+        TopicMetadata metadata = topicMetadata.get(topic);
+        List<PartitionInfo> partitions = metadata.getPartitions();
+        PartitionInfo pInfo = null;
+
+        for (PartitionInfo info : partitions) {
+            if (info.getId() == partition) {
+                pInfo = info;
+                break;
+            }
+        }
+
+        if (pInfo == null) {
+            throw new IOException("partition not available: " + partition);
+        }
+    
+        int leader = pInfo.getLeader();
+        BrokerInfo brokerLeader = brokers.get(leader);
+
+        if (brokerLeader == null) {
+            refreshMetadata();
+            brokerLeader = brokers.get(leader);
+
+            if (brokerLeader == null) {
+                throw new IOException("Leader broker not found");
+            }
+        }
+
+        //ready to fetch 
+        try (SocketChannel channel = SocketChannel.open()) {
+            channel.connect(new InetSocketAddress(brokerLeader.getHost(), brokerLeader.getPort()));
+
+            ByteBuffer request = Protocol.encodeFetchRequest(topic, partition, offset, maxBytes);
+            channel.write(request);
+
+            //get response
+            ByteBuffer response = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE);
+            int bytesRead = channel.read(response);
+
+            if (bytesRead <= 0) {
+                throw new IOException("No data received");
+            }
+
+            response.flip();
+            
+            Protocol.FetchResult result = Protocol.decodeFetchResponse(response);
+
+            if (!result.isSuccess()) {
+                throw new IOException("Failed to fetch messages: " + result.getError());
+            }
+            
+            List<byte[]> messages = new ArrayList<>();
+            for (byte[] msg : result.getMessages()) {
+                messages.add(msg);
+            }
+
+            return messages;
+        }
     }
     // Additional methods and inner classes for metadata
+
+    public Map<String, TopicMetadata> getTopicMetadata() {
+        return new HashMap<>(topicMetadata);
+    }
+    
+    public TopicMetadata getTopicMetadata(String topic) {
+        return topicMetadata.get(topic);
+    }
+    
+    public Map<Integer, BrokerInfo> getBrokers() {
+        return new HashMap<>(brokers);
+    }
 
     public static class TopicMetadata {
         private final String name;
