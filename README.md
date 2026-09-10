@@ -27,3 +27,19 @@ This is a small version made to educate myself on distributed systems.
 * Message replication between brokers
 
 * Java producer and consumer clients
+
+## Architecture
+
+Producer
+   |
+   v
+Broker cluster <----> ZooKeeper
+   |
+   v
+Partition leader ----> Partition followers
+   |
+   v
+Append-only log segments
+   |
+   v
+Consumer reads by offset
