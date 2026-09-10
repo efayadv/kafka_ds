@@ -141,8 +141,66 @@ public class SimpleKafkaClient {
 
     public long send(String topic, int partition, byte[] message) throws IOException {
         // Send a message to a specific topic-partition
-        
-        return -1; // Placeholder
+        if (!topicMetadata.containsKey(topic)) {
+            refreshMetadata();
+            if (!topicMetadata.containsKey(topic)) {
+                //
+                throw new IOException("Topic not found: " + topic);
+            }
+        }
+
+        //find leader of partition
+        //break down from topicMetadata -> PartitionMetdata -> getLeader()
+        TopicMetadata metadata = topicMetadata.get(topic);
+        List<PartitionInfo> partitions = metadata.getPartitions();
+        PartitionInfo pInfo = null;
+
+        for (PartitionInfo info : partitions) {
+            if (info.getId() == partition) {
+                pInfo = info;
+                break;
+            }
+        }
+
+        if (pInfo == null) {
+            throw new IOException("partition not available: " + partition);
+        }
+    
+        int leader = pInfo.getLeader();
+        BrokerInfo brokerLeader = brokers.get(leader);
+
+        if (brokerLeader == null) {
+            refreshMetadata();
+            brokerLeader = brokers.get(leader);
+
+            if (brokerLeader == null) {
+                throw new IOException("Leader broker not found");
+            }
+        }
+
+        //send to leader
+        try (SocketChannel channel = SocketChannel.open()) {
+            channel.connect(new InetSocketAddress(brokerLeader.getHost(), brokerLeader.getPort()));
+
+            ByteBuffer request = Protocol.encodeProduceRequest(topic, partition, message);
+            channel.write(request);
+
+            ByteBuffer response = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE);
+            int bytesRead = channel.read(response);
+            if (bytesRead <= 0) {
+                throw new IOException("No data received");
+            }
+
+            response.flip();
+            Protocol.ProduceResult result = Protocol.decodeProduceResponse(response);
+
+            if (result.isSuccess()) {
+                throw new IOException("Failed to produce message: " + result.getError());
+            }
+
+            return result.getOffset();
+        }
+
     }
     public List<byte[]> fetch(String topic, int partition, long offset, int maxBytes) throws IOException {
         // Fetch messages from a topic-partition
