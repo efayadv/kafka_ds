@@ -122,7 +122,7 @@ public class SimpleKafkaClient {
                     byte[] errorBytes = new byte[errorLength];
                     response.get(errorBytes);
                     String error = new String(errorBytes);
-                    LOGGER.warning("Error creating topic: " + topic);
+                    LOGGER.warning("Error creating topic: " + error);
                     return false;
                 }
                 throw new IOException("Invalid create topic response type: " + responseType);
