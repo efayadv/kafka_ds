@@ -1,3 +1,8 @@
 /Users/emiliofayad/kafka_ds/src/main/java/com/simplekafka/broker/BrokerInfo.java
+/Users/emiliofayad/kafka_ds/src/main/java/com/simplekafka/broker/Partition.java
 /Users/emiliofayad/kafka_ds/src/main/java/com/simplekafka/broker/Protocol.java
+/Users/emiliofayad/kafka_ds/src/main/java/com/simplekafka/broker/SimpleKafkaBroker.java
 /Users/emiliofayad/kafka_ds/src/main/java/com/simplekafka/broker/ZookeeperClient.java
+/Users/emiliofayad/kafka_ds/src/main/java/com/simplekafka/client/SimpleKafkaClient.java
+/Users/emiliofayad/kafka_ds/src/main/java/com/simplekafka/client/SimpleKafkaConsumer.java
+/Users/emiliofayad/kafka_ds/src/main/java/com/simplekafka/client/SimpleKafkaProducer.java

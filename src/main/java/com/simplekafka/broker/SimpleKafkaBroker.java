@@ -31,7 +31,7 @@ public class SimpleKafkaBroker {
     private final AtomicBoolean isController;
     private final ExecutorService executor;
     private final ZookeeperClient zkClient;
-    private final ConcurrentHashMap topics;
+    private final Map<String, List<Partition>> topics;
     private final ServerSocketChannel serverChannel;
     private final Map<Integer, BrokerInfo> clusterMetadata;
 
@@ -274,6 +274,11 @@ public class SimpleKafkaBroker {
                 }
             }).start(); 
         }
+    }
+
+    private void onControllerChange() {
+        LOGGER.info("Controller changed, initiating new election");
+        electController();
     }
 
     private void loadTopic(String topic) throws Exception {

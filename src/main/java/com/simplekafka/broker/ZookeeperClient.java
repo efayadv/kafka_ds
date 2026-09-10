@@ -166,9 +166,11 @@ public class ZookeeperClient implements Watcher{
     public void watchNode(String path, NodeCallback callback) {
         try {
             zooKeeper.exists(path, event -> {
-                if (event.getType() == Watcher.Event.EventType.NodeDeleted ||
-                    event.getType() == Watcher.Event.EventType.NodeDataChanged ||
-                    event.getType() == Watcher.Event.EventType.NodeCreated) {
+                if (event.getType() == Watcher.Event.EventType.NodeDeleted) {
+                    callback.onNodeChanged();
+                } else if (event.getType() == Watcher.Event.EventType.NodeDataChanged) {
+                    callback.onNodeChanged();
+                } else if (event.getType() == Watcher.Event.EventType.NodeCreated) {
                     callback.onNodeChanged();
                 }
             });
