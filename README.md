@@ -1,12 +1,12 @@
-### This is my own version of a Apache Kafka like Distributed System
+# This is my own version of a Apache Kafka like Distributed System
 
 The project explores the core ideas behind distributed log systems: binary client–broker communication, topic partitioning, append-only storage, broker discovery, controller election, leader/follower replication, and message consumption by offset.
 
 This is a small version made to educate myself on distributed systems.
 
-Features
+## Features
 
-Custom binary wire protocol built with Java ByteBuffer
+* Custom binary wire protocol built with Java ByteBuffer
 
 Topic and partition-based message organization
 
