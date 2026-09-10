@@ -30,6 +30,7 @@ This is a small version made to educate myself on distributed systems.
 
 ## Architecture
 
+```text
 Producer
    |
    v
@@ -43,3 +44,4 @@ Append-only log segments
    |
    v
 Consumer reads by offset
+```
